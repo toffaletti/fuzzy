@@ -27,12 +27,12 @@ BOOST_AUTO_TEST_CASE(mmap_shared_test) {
 
 struct merge_int {
     void operator()(uint32_t &a, const uint32_t &b) {
-        a = std::max(a, b);
+        a = std::min(a, b);
     }
 };
 
 BOOST_AUTO_TEST_CASE(fuzzy_map_test) {
-    fuzzy_map<uint32_t, uint32_t, merge_int, 3> a(4*1024*30);
+    fuzzy_map<uint32_t, uint32_t, merge_int, 3> a(2*1024);
     for (uint32_t i=0; i<150; ++i) {
         a.set(i, i);
     }
@@ -82,7 +82,7 @@ BOOST_AUTO_TEST_CASE(fuzzy_rate_test) {
 
 template <time_t ...Decays>
 struct dyn_rate {
-    std::array<double, sizeof...(Decays)> rates = {};
+    std::array<double, sizeof...(Decays)> rates = {{}};
     uint64_t updated = 0;
 
     template <time_t D> struct decay {};
