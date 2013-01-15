@@ -11,14 +11,16 @@
 template <class T>
 class mmap_array {
 private:
-    size_t _size;
-    int _fd=-1;
+    size_t _size = 0;
+    int _fd = -1;
     T *_map = (T *)MAP_FAILED;
 public:
     static_assert(4096 % sizeof(T) == 0, "sizeof(T) not page aligned");
     // non-copyable
     mmap_array(const mmap_array&) = delete;
     mmap_array &operator=(const mmap_array &) = delete;
+
+    mmap_array() {}
 
     mmap_array(size_t size) : _size(size) {
         _map = (T *)::mmap(NULL, size * sizeof(T), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -42,6 +44,21 @@ public:
             close();
             throw std::runtime_error(std::string("could not mmap ") + filename);
         }
+    }
+
+    mmap_array(mmap_array &&other) {
+        std::swap(_size, other._size);
+        std::swap(_fd, other._fd);
+        std::swap(_map, other._map);
+    }
+
+    mmap_array &operator= (mmap_array &&other) {
+        if (this != &other) {
+            std::swap(_size, other._size);
+            std::swap(_fd, other._fd);
+            std::swap(_map, other._map);
+        }
+        return *this;
     }
 
     T &operator[] (size_t n) const {
