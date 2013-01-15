@@ -16,7 +16,6 @@ else()
 endif()
 
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -std=c++11 -ggdb")
-add_library(store hashstore.cc termstore.cc)
 
 add_definitions(-DBOOST_TEST_DYN_LINK)
 add_executable(test_mmap test_mmap.cc)
