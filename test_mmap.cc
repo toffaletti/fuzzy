@@ -2,6 +2,8 @@
 #include <boost/test/unit_test.hpp>
 #include "mmap_array.hh"
 #include "fuzzy_map.hh"
+#include <array>
+#include <cmath>
 
 BOOST_AUTO_TEST_CASE(mmap_anon_test) {
     mmap_array<uint32_t> a(1024);
@@ -50,7 +52,7 @@ struct rate {
 
     void update(double v, uint32_t now) {
         double z = -(double)(now - updated);
-        double m = exp(z / a);
+        double m = std::exp(z / a);
         double r = rate;
         r *= m;
         r += v / a;
@@ -76,5 +78,51 @@ BOOST_AUTO_TEST_CASE(fuzzy_rate_test) {
     }
     a.set("hi", r);
     BOOST_CHECK_CLOSE(10.0, a["hi"].rate, 1.0);
+}
+
+template <time_t ...Decays>
+struct dyn_rate {
+    std::array<double, sizeof...(Decays)> rates = {};
+    uint64_t updated = 0;
+
+    template <time_t D> struct decay {};
+
+    void update(double v, uint64_t now) {
+        double z = -(double)(now - updated);
+        update_rates(v, z, decay<Decays>()...);
+        updated = now;
+    }
+
+    template <time_t D, time_t ...Ds>
+    void update_rates(double v, double z, decay<D>, decay<Ds>...) {
+        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
+        double m = std::exp(z / D);
+        double r = std::get<i>(rates);
+        r *= m;
+        r += v / D;
+        std::get<i>(rates) = r;
+        update_rates(v, z, decay<Ds>()...);
+    }
+
+    template <time_t D>
+    void update_rates(double v, double z, decay<D>) {
+        constexpr size_t i = sizeof...(Decays)-1;
+        double m = std::exp(z / D);
+        double r = std::get<i>(rates);
+        r *= m;
+        r += v / D;
+        std::get<i>(rates) = r;
+    }
+
+};
+
+BOOST_AUTO_TEST_CASE(fuzzy_dyn_rate_test) {
+    dyn_rate<60, 5*60, 10*60> dr;
+    for (unsigned i=0; i<60*60; ++i) {
+        dr.update(10.0, i);
+    }
+    BOOST_CHECK_CLOSE(10.0, std::get<0>(dr.rates), 1.0);
+    BOOST_CHECK_CLOSE(10.0, std::get<1>(dr.rates), 1.0);
+    BOOST_CHECK_CLOSE(10.0, std::get<2>(dr.rates), 1.0);
 }
 
