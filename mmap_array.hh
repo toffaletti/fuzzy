@@ -9,17 +9,17 @@
 #include <sstream>
 #include <stdexcept>
 
+class mmap_array_error : public std::runtime_error {
+    public:
+        mmap_array_error(const std::ostringstream &ss) : std::runtime_error(ss.str()) {}
+};
+
 template <class T>
 class mmap_array {
 private:
     size_t _size = 0;
     int _fd = -1;
     T *_map = (T *)MAP_FAILED;
-public:
-    class error : public std::runtime_error {
-        public:
-            error(const std::ostringstream &ss) : std::runtime_error(ss.str()) {}
-    };
 public:
     static_assert(4096 % sizeof(T) == 0, "sizeof(T) not page aligned");
     // non-copyable
@@ -31,7 +31,7 @@ public:
         if (_map == MAP_FAILED) {
             std::ostringstream ss;
             ss << "mmap failed " << sys_errlist[errno];
-            throw error(ss);
+            throw mmap_array_error(ss);
         }
     }
 
@@ -40,20 +40,20 @@ public:
         if (_fd == -1) {
             std::ostringstream ss;
             ss << "opening " << filename << " failed " << sys_errlist[errno];
-            throw error(ss);
+            throw mmap_array_error(ss);
         }
         int status = ::posix_fallocate(_fd, 0, size * sizeof(T));
         if (status != 0) {
             std::ostringstream ss;
             ss << "fallocate " << filename << " failed " << sys_errlist[errno];
-            throw error(ss);
+            throw mmap_array_error(ss);
         }
         _map = (T *)::mmap(NULL, size * sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, _fd, 0);
         if (_map == MAP_FAILED) {
             close();
             std::ostringstream ss;
             ss << "mmap " << filename << " failed " << sys_errlist[errno];
-            throw error(ss);
+            throw mmap_array_error(ss);
         }
     }
 
