@@ -4,6 +4,7 @@
 #include "fuzzy_map.hh"
 #include <array>
 #include <cmath>
+#include <chrono>
 
 BOOST_AUTO_TEST_CASE(mmap_anon_test) {
     mmap_array<uint32_t> a(1024);
@@ -120,6 +121,59 @@ BOOST_AUTO_TEST_CASE(fuzzy_dyn_rate_test) {
     dyn_rate<60, 5*60, 10*60> dr;
     for (unsigned i=0; i<60*60; ++i) {
         dr.update(10.0, i);
+    }
+    BOOST_CHECK_CLOSE(10.0, std::get<0>(dr.rates), 1.0);
+    BOOST_CHECK_CLOSE(10.0, std::get<1>(dr.rates), 1.0);
+    BOOST_CHECK_CLOSE(10.0, std::get<2>(dr.rates), 1.0);
+}
+
+template <class TickResolution, class DecayResolution, size_t ...Decays>
+struct dyn_rate2 {
+    typedef std::chrono::steady_clock Clock;
+
+    std::array<double, sizeof...(Decays)> rates = {{}};
+    Clock::time_point updated = {};
+
+    template <time_t D> struct decay {};
+
+    void update(double v, Clock::time_point now) {
+        using namespace std::chrono;
+        double z = -(double)duration_cast<TickResolution>(now - updated).count();
+        update_rates(v, z, decay<Decays>()...);
+        updated = now;
+    }
+
+    template <time_t D, time_t ...Ds>
+    void update_rates(double v, double z, decay<D>, decay<Ds>...) {
+        using namespace std::chrono;
+        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
+        double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
+        double r = std::get<i>(rates);
+        r *= m;
+        r += v / duration_cast<TickResolution>(DecayResolution{D}).count();
+        std::get<i>(rates) = r;
+        update_rates(v, z, decay<Ds>()...);
+    }
+
+    template <time_t D>
+    void update_rates(double v, double z, decay<D>) {
+        using namespace std::chrono;
+        constexpr size_t i = sizeof...(Decays)-1;
+        double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
+        double r = std::get<i>(rates);
+        r *= m;
+        r += v / duration_cast<TickResolution>(DecayResolution{D}).count();
+        std::get<i>(rates) = r;
+    }
+
+};
+
+BOOST_AUTO_TEST_CASE(fuzzy_dyn_rate2_test) {
+    using namespace std::chrono;
+    dyn_rate2<seconds, minutes, 1, 5, 10> dr;
+    steady_clock::time_point now = steady_clock::now();
+    for (unsigned i=0; i<60*60; ++i) {
+        dr.update(10.0, now+seconds(i));
     }
     BOOST_CHECK_CLOSE(10.0, std::get<0>(dr.rates), 1.0);
     BOOST_CHECK_CLOSE(10.0, std::get<1>(dr.rates), 1.0);
