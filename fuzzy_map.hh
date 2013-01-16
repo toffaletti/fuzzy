@@ -1,3 +1,5 @@
+#ifndef FUZZY_MAP_HH
+#define FUZZY_MAP_HH
 #include "mmap_array.hh"
 #include "bits/hash_bytes.h"
 
@@ -59,3 +61,4 @@ private:
             _set(fnv(hash), v, index<N-1>());
         }
 };
+#endif
