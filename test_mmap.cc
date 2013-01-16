@@ -207,9 +207,9 @@ BOOST_AUTO_TEST_CASE(fuzzy_dyn_rate2_test) {
     BOOST_CHECK_CLOSE(10.0, dr.rate<1>(now+seconds(60*60)), 1.0);
     BOOST_CHECK_CLOSE(10.0, dr.rate<2>(now+seconds(60*60)), 1.0);
 
-    BOOST_CHECK(1.0 > dr.rate<0>(now+seconds(60*60*2)));
-    BOOST_CHECK(1.0 > dr.rate<1>(now+seconds(60*60*2)));
-    BOOST_CHECK(1.0 > dr.rate<2>(now+seconds(60*60*2)));
+    BOOST_CHECK_GT(1.0, dr.rate<0>(now+seconds(60*60*2)));
+    BOOST_CHECK_GT(1.0, dr.rate<1>(now+seconds(60*60*2)));
+    BOOST_CHECK_GT(1.0, dr.rate<2>(now+seconds(60*60*2)));
 
 }
 
