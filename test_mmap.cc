@@ -148,9 +148,7 @@ struct dyn_rate2 {
     void update_rates(double v, double z, decay<D>, decay<Ds>...) {
         using namespace std::chrono;
         constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
-        double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
-        double r = std::get<i>(rates);
-        r *= m;
+        double r = rate(z, index<i>(), decay<D>());
         r += v / duration_cast<TickResolution>(DecayResolution{D}).count();
         std::get<i>(rates) = r;
         update_rates(v, z, decay<Ds>()...);
@@ -160,35 +158,30 @@ struct dyn_rate2 {
     void update_rates(double v, double z, decay<D>) {
         using namespace std::chrono;
         constexpr size_t i = sizeof...(Decays)-1;
-        double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
-        double r = std::get<i>(rates);
-        r *= m;
+        double r = rate(z, index<i>(), decay<D>());
         r += v / duration_cast<TickResolution>(DecayResolution{D}).count();
         std::get<i>(rates) = r;
     }
 
     template <size_t N>
     double rate(const Clock::time_point &now) {
-        return rate(now, index<N>(), decay<Decays>()...);
-    }
-
-    template <size_t N, size_t D, size_t ...Ds>
-    double rate(const Clock::time_point &now, index<N>, decay<D>, decay<Ds>...) {
-        using namespace std::chrono;
-        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
-        if (i == N) {
-            double z = -(double)duration_cast<TickResolution>(now - updated).count();
-            double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
-            double r = std::get<i>(rates);
-            return r * m;
-        }
-        return rate(now, index<N>(), decay<Ds>()...);
-    }
-
-    template <size_t N, size_t D, size_t ...Ds>
-    double rate(const Clock::time_point &now, index<N>, decay<D>) {
         using namespace std::chrono;
         double z = -(double)duration_cast<TickResolution>(now - updated).count();
+        return rate(z, index<N>(), decay<Decays>()...);
+    }
+
+    template <size_t N, size_t D, size_t ...Ds>
+    double rate(double z, index<N>, decay<D>, decay<Ds>...) {
+        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
+        if (i == N) {
+            return rate(z, index<N>(), decay<D>());
+        }
+        return rate(z, index<N>(), decay<Ds>()...);
+    }
+
+    template <size_t N, size_t D, size_t ...Ds>
+    double rate(double z, index<N>, decay<D>) {
+        using namespace std::chrono;
         double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
         double r = std::get<N>(rates);
         return r * m;
