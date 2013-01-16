@@ -2,9 +2,9 @@
 #include <boost/test/unit_test.hpp>
 #include "mmap_array.hh"
 #include "fuzzy_map.hh"
-#include <array>
-#include <cmath>
-#include <chrono>
+#include "ewma_tuple.hh"
+
+using namespace std::chrono;
 
 BOOST_AUTO_TEST_CASE(mmap_anon_test) {
     mmap_array<uint32_t> a(1024);
@@ -44,27 +44,14 @@ BOOST_AUTO_TEST_CASE(fuzzy_map_test) {
     }
 }
 
-struct rate {
-    static constexpr double a = 36;
-
-    double rate = 0.0;
-    int32_t updated = 0;
-    uint32_t trended = 0;
-
-    void update(double v, uint32_t now) {
-        double z = -(double)(now - updated);
-        double m = std::exp(z / a);
-        double r = rate;
-        r *= m;
-        r += v / a;
-        rate = r;
-        updated = now;
-    }
+struct rate : public ewma_tuple<seconds, seconds, 36> {
+    uint64_t trended = 0;
+    uint64_t padding = 0;
 } __attribute__((packed));
 
 struct merge_rate {
     void operator()(rate &a, const rate &b) {
-        a.rate = std::min(a.rate, b.rate);
+        std::get<0>(a.rates) = std::min(std::get<0>(a.rates), std::get<0>(b.rates));
         a.updated = std::min(a.updated, b.updated);
         a.trended = std::min(a.trended, b.trended);
     }
@@ -74,124 +61,27 @@ BOOST_AUTO_TEST_CASE(fuzzy_rate_test) {
     fuzzy_map<std::string, rate, merge_rate, 3> a(1024);
 
     rate r = a["hi"];
+    steady_clock::time_point now = steady_clock::now();
     for (unsigned i=0; i<36*5; ++i) {
-        r.update(10, i);
+        r.update(10, now+seconds{i});
     }
     a.set("hi", r);
-    BOOST_CHECK_CLOSE(10.0, a["hi"].rate, 1.0);
+    BOOST_CHECK_CLOSE(10.0, std::get<0>(a["hi"].rates), 1.0);
 }
 
-template <time_t ...Decays>
-struct dyn_rate {
-    std::array<double, sizeof...(Decays)> rates = {{}};
-    uint64_t updated = 0;
-
-    template <time_t D> struct decay {};
-
-    void update(double v, uint64_t now) {
-        double z = -(double)(now - updated);
-        update_rates(v, z, decay<Decays>()...);
-        updated = now;
-    }
-
-    template <time_t D, time_t ...Ds>
-    void update_rates(double v, double z, decay<D>, decay<Ds>...) {
-        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
-        double m = std::exp(z / D);
-        double r = std::get<i>(rates);
-        r *= m;
-        r += v / D;
-        std::get<i>(rates) = r;
-        update_rates(v, z, decay<Ds>()...);
-    }
-
-    template <time_t D>
-    void update_rates(double v, double z, decay<D>) {
-        constexpr size_t i = sizeof...(Decays)-1;
-        double m = std::exp(z / D);
-        double r = std::get<i>(rates);
-        r *= m;
-        r += v / D;
-        std::get<i>(rates) = r;
-    }
-
-};
-
 BOOST_AUTO_TEST_CASE(fuzzy_dyn_rate_test) {
-    dyn_rate<60, 5*60, 10*60> dr;
+    ewma_tuple<seconds, seconds, 60, 5*60, 10*60> dr;
+    steady_clock::time_point now = steady_clock::now();
     for (unsigned i=0; i<60*60; ++i) {
-        dr.update(10.0, i);
+        dr.update(10.0, now+seconds{i});
     }
     BOOST_CHECK_CLOSE(10.0, std::get<0>(dr.rates), 1.0);
     BOOST_CHECK_CLOSE(10.0, std::get<1>(dr.rates), 1.0);
     BOOST_CHECK_CLOSE(10.0, std::get<2>(dr.rates), 1.0);
 }
 
-template <class TickResolution, class DecayResolution, size_t ...Decays>
-struct dyn_rate2 {
-    typedef std::chrono::steady_clock Clock;
-
-    std::array<double, sizeof...(Decays)> rates = {{}};
-    Clock::time_point updated = {};
-
-    template <size_t D> struct decay {};
-    template <size_t N> struct index {};
-
-    void update(double v, Clock::time_point now) {
-        using namespace std::chrono;
-        double z = -(double)duration_cast<TickResolution>(now - updated).count();
-        update_rates(v, z, decay<Decays>()...);
-        updated = now;
-    }
-
-    template <size_t D, size_t ...Ds>
-    void update_rates(double v, double z, decay<D>, decay<Ds>...) {
-        using namespace std::chrono;
-        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
-        double r = rate(z, index<i>(), decay<D>());
-        r += v / duration_cast<TickResolution>(DecayResolution{D}).count();
-        std::get<i>(rates) = r;
-        update_rates(v, z, decay<Ds>()...);
-    }
-
-    template <size_t D>
-    void update_rates(double v, double z, decay<D>) {
-        using namespace std::chrono;
-        constexpr size_t i = sizeof...(Decays)-1;
-        double r = rate(z, index<i>(), decay<D>());
-        r += v / duration_cast<TickResolution>(DecayResolution{D}).count();
-        std::get<i>(rates) = r;
-    }
-
-    template <size_t N>
-    double rate(const Clock::time_point &now) {
-        using namespace std::chrono;
-        double z = -(double)duration_cast<TickResolution>(now - updated).count();
-        return rate(z, index<N>(), decay<Decays>()...);
-    }
-
-    template <size_t N, size_t D, size_t ...Ds>
-    double rate(double z, index<N>, decay<D>, decay<Ds>...) {
-        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
-        if (i == N) {
-            return rate(z, index<N>(), decay<D>());
-        }
-        return rate(z, index<N>(), decay<Ds>()...);
-    }
-
-    template <size_t N, size_t D, size_t ...Ds>
-    double rate(double z, index<N>, decay<D>) {
-        using namespace std::chrono;
-        double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
-        double r = std::get<N>(rates);
-        return r * m;
-    }
-
-};
-
 BOOST_AUTO_TEST_CASE(fuzzy_dyn_rate2_test) {
-    using namespace std::chrono;
-    dyn_rate2<seconds, minutes, 1, 5, 10> dr;
+    ewma_tuple<seconds, minutes, 1, 5, 10> dr;
     steady_clock::time_point now = steady_clock::now();
     for (unsigned i=0; i<60*60; ++i) {
         dr.update(10.0, now+seconds(i));
