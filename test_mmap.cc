@@ -134,7 +134,8 @@ struct dyn_rate2 {
     std::array<double, sizeof...(Decays)> rates = {{}};
     Clock::time_point updated = {};
 
-    template <time_t D> struct decay {};
+    template <size_t D> struct decay {};
+    template <size_t N> struct index {};
 
     void update(double v, Clock::time_point now) {
         using namespace std::chrono;
@@ -143,7 +144,7 @@ struct dyn_rate2 {
         updated = now;
     }
 
-    template <time_t D, time_t ...Ds>
+    template <size_t D, size_t ...Ds>
     void update_rates(double v, double z, decay<D>, decay<Ds>...) {
         using namespace std::chrono;
         constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
@@ -155,7 +156,7 @@ struct dyn_rate2 {
         update_rates(v, z, decay<Ds>()...);
     }
 
-    template <time_t D>
+    template <size_t D>
     void update_rates(double v, double z, decay<D>) {
         using namespace std::chrono;
         constexpr size_t i = sizeof...(Decays)-1;
@@ -164,6 +165,33 @@ struct dyn_rate2 {
         r *= m;
         r += v / duration_cast<TickResolution>(DecayResolution{D}).count();
         std::get<i>(rates) = r;
+    }
+
+    template <size_t N>
+    double rate(const Clock::time_point &now) {
+        return rate(now, index<N>(), decay<Decays>()...);
+    }
+
+    template <size_t N, size_t D, size_t ...Ds>
+    double rate(const Clock::time_point &now, index<N>, decay<D>, decay<Ds>...) {
+        using namespace std::chrono;
+        constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
+        if (i == N) {
+            double z = -(double)duration_cast<TickResolution>(now - updated).count();
+            double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
+            double r = std::get<i>(rates);
+            return r * m;
+        }
+        return rate(now, index<N>(), decay<Ds>()...);
+    }
+
+    template <size_t N, size_t D, size_t ...Ds>
+    double rate(const Clock::time_point &now, index<N>, decay<D>) {
+        using namespace std::chrono;
+        double z = -(double)duration_cast<TickResolution>(now - updated).count();
+        double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
+        double r = std::get<N>(rates);
+        return r * m;
     }
 
 };
@@ -175,8 +203,13 @@ BOOST_AUTO_TEST_CASE(fuzzy_dyn_rate2_test) {
     for (unsigned i=0; i<60*60; ++i) {
         dr.update(10.0, now+seconds(i));
     }
-    BOOST_CHECK_CLOSE(10.0, std::get<0>(dr.rates), 1.0);
-    BOOST_CHECK_CLOSE(10.0, std::get<1>(dr.rates), 1.0);
-    BOOST_CHECK_CLOSE(10.0, std::get<2>(dr.rates), 1.0);
+    BOOST_CHECK_CLOSE(10.0, dr.rate<0>(now+seconds(60*60)), 1.0);
+    BOOST_CHECK_CLOSE(10.0, dr.rate<1>(now+seconds(60*60)), 1.0);
+    BOOST_CHECK_CLOSE(10.0, dr.rate<2>(now+seconds(60*60)), 1.0);
+
+    BOOST_CHECK(1.0 > dr.rate<0>(now+seconds(60*60*2)));
+    BOOST_CHECK(1.0 > dr.rate<1>(now+seconds(60*60*2)));
+    BOOST_CHECK(1.0 > dr.rate<2>(now+seconds(60*60*2)));
+
 }
 
