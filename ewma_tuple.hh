@@ -40,15 +40,16 @@ struct ewma_tuple {
         std::get<i>(rates) = r;
     }
 
-    template <size_t N>
-    double rate(const Clock::time_point &now) {
+    template <size_t N, class RateResolution=TickResolution>
+    double rate(const Clock::time_point &now) const {
         using namespace std::chrono;
         double z = -(double)duration_cast<TickResolution>(now - updated).count();
-        return rate(z, index<N>(), decay<Decays>()...);
+        return rate(z, index<N>(), decay<Decays>()...) *
+            (double)duration_cast<TickResolution>(RateResolution{1}).count();
     }
 
     template <size_t N, size_t D, size_t ...Ds>
-    double rate(double z, index<N>, decay<D>, decay<Ds>...) {
+    double rate(double z, index<N>, decay<D>, decay<Ds>...) const {
         constexpr size_t i = sizeof...(Decays) - (sizeof...(Ds)+1);
         if (i == N) {
             return rate(z, index<N>(), decay<D>());
@@ -57,7 +58,7 @@ struct ewma_tuple {
     }
 
     template <size_t N, size_t D, size_t ...Ds>
-    double rate(double z, index<N>, decay<D>) {
+    double rate(double z, index<N>, decay<D>) const {
         using namespace std::chrono;
         double m = std::exp(z / duration_cast<TickResolution>(DecayResolution{D}).count());
         double r = std::get<N>(rates);
